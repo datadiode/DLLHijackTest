@@ -1,24 +1,7 @@
 # DLLHijackTest
+[![StandWithUkraine](https://raw.githubusercontent.com/vshymanskyy/StandWithUkraine/main/badges/StandWithUkraine.svg)](https://github.com/vshymanskyy/StandWithUkraine/blob/main/docs/README.md)
 
-![Get-PotentialDLLHijack.ps1](https://raw.githubusercontent.com/slyd0g/DLLHijackTest/master/example.png)
+This fork is tailored to very specific research ambitions where most features of the original software are of no concern, hence were removed.
 
-## Blogpost
-- https://posts.specterops.io/automating-dll-hijack-discovery-81c4295904b0
-
-## Usage
-- Use Procmon to obtain a CSV file of potential DLL hijacks
-- Modify ```outputFile``` variable within ```write.cpp```
-- Build the project for the appropriate architecture
-- Open ```powershell.exe``` and load ```Get-PotentialDLLHijack.ps1``` into memory
-	- ```. .\Get-PotentialDLLHijack.ps1```
-- Run ```Get-PotentialDLLHijack``` with the appropriate flags
-	- Example:
-		- ```Get-PotentialDLLHijack -CSVPath .\Logfile.CSV -MaliciousDLLPath .\DLLHijackTest.dll -ProcessPath "C:\Users\John\AppData\Local\Programs\Microsoft VS Code\Code.exe"```
-	- ```-CSVPath``` takes in a path to a .csv file exported from Procmon
-	- ```-MaliciousDLLPath``` takes in a path to your compiled hijack DLL
-	- ```-ProcessPath``` takes in a path to the executable you want to run
-	- ```-ProcessArguments``` takes in commandline arguments you want to pass to the executeable
-- View the contents of ```outputFile``` for found DLL hijacks
-	- Run ```strings.exe``` on the ```outputFile``` to clean up the output paths
-- Party!!!
-
+It is somewhat more similar to the SENTINEL.DLL mentioned in 
+https://insights.sei.cmu.edu/blog/bypassing-application-whitelisting/, but doesn't impose likewise rigid restrictions on its use and offers a convenient way to add more entrypoints.
