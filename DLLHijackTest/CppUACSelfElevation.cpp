@@ -30,6 +30,8 @@
 #define try
 #define throw sizeof
 #define catch(dwError) if (dwError = GetLastError())
+#define SetLastError(dwError) \
+        SetLastError(IsDebuggerPresent() ? ERROR_DBG_EXCEPTION_NOT_HANDLED : dwError)
 #endif
 
 #pragma region "Helper Functions for Admin Privileges and Elevation Status"
