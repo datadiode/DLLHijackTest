@@ -47,7 +47,8 @@ static void CreateProxyFor(LPCSTR name)
         BYTE const* const pRD = pORG == reinterpret_cast<BYTE*>(hModule) ? pORG : pORG + pSH->PointerToRawData - pSH->VirtualAddress;
         IMAGE_EXPORT_DIRECTORY const* const pEAT = reinterpret_cast<IMAGE_EXPORT_DIRECTORY const*>(pRD + offset);
         ULONG const* const rgAddressOfNames = reinterpret_cast<ULONG const*>(pRD + pEAT->AddressOfNames);
-        //USHORT const* const rgAddressOfNameOrdinals = reinterpret_cast<USHORT const*>(pRD + pEAT->AddressOfNameOrdinals);
+        USHORT const* const rgAddressOfNameOrdinals = reinterpret_cast<USHORT const*>(pRD + pEAT->AddressOfNameOrdinals);
+        BYTE* const rgfUsedOrdinals = static_cast<BYTE*>(LocalAlloc(LPTR, USHRT_MAX + 1));
 
         char* dot = end;
         while (*dot != '.') ++dot;
@@ -67,13 +68,26 @@ static void CreateProxyFor(LPCSTR name)
         for (DWORD i = 0; i < pEAT->NumberOfNames; ++i)
         {
             name = reinterpret_cast<LPCSTR>(pRD + rgAddressOfNames[i]);
-            //USHORT ordinal = rgAddressOfNameOrdinals[i];
+            DWORD j = rgAddressOfNameOrdinals[i];
+            rgfUsedOrdinals[j] = TRUE;
             char line[1024];
-            int length = wsprintfA(line, "#pragma comment(linker, \"/export:%s=%s%s\")\n", name, path, name);
+            int length = wsprintfA(line, "#pragma comment(linker, \"/export:%s=%s%s,@%u\")\n", name, path, name, j + pEAT->Base);
+            _lwrite(file, line, length);
+        }
+
+        // Ensure a consecutive sequence of ordinals by filling in the gaps
+        for (DWORD j = 0; j < pEAT->NumberOfFunctions; ++j)
+        {
+            if (rgfUsedOrdinals[j])
+                continue;
+            char line[1024];
+            int length = wsprintfA(line, "#pragma comment(linker, \"/export:%u=KERNEL32.DebugBreak,@%u\")\n", j, j + pEAT->Base);
             _lwrite(file, line, length);
         }
 
         _lclose(file);
+
+        LocalFree(rgfUsedOrdinals);
 
         WinExec(cmd, SW_SHOWNORMAL);
     }
@@ -88,10 +102,22 @@ void WINAPI DLLHijackTest_PostBuild(HWND, HINSTANCE, LPSTR lpCmdLine, int)
     }
 
     SetCurrentDirectoryA(lpCmdLine);
-    CreateProxyFor("IPHLPAPI.DLL");
-    CreateProxyFor("winhttp.dll");
-    CreateProxyFor("ncrypt.dll");
+    CreateProxyFor("authz.dll");
+    CreateProxyFor("bcrypt.dll");
+    CreateProxyFor("d3d9.dll");
     CreateProxyFor("d3d11.dll");
+    CreateProxyFor("d3d12.dll");
+    CreateProxyFor("dwmapi.dll");
+    CreateProxyFor("DWrite.dll");
     CreateProxyFor("dxgi.dll");
+    CreateProxyFor("IPHLPAPI.DLL");
     CreateProxyFor("MPR.DLL");
+    CreateProxyFor("ncrypt.dll");
+    CreateProxyFor("setupapi.dll");
+    CreateProxyFor("sfc.dll");
+    CreateProxyFor("userenv.dll");
+    CreateProxyFor("uxtheme.dll");
+    CreateProxyFor("version.dll");
+    CreateProxyFor("winhttp.dll");
+    CreateProxyFor("winmm.dll");
 }
