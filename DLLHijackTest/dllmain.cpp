@@ -104,15 +104,19 @@ void WINAPI DLLHijackTest_PostBuild(HWND, HINSTANCE, LPSTR lpCmdLine, int)
     SetCurrentDirectoryA(lpCmdLine);
     CreateProxyFor("authz.dll");
     CreateProxyFor("bcrypt.dll");
+    CreateProxyFor("crypt32.dll");
     CreateProxyFor("d3d9.dll");
     CreateProxyFor("d3d11.dll");
     CreateProxyFor("d3d12.dll");
     CreateProxyFor("dwmapi.dll");
     CreateProxyFor("DWrite.dll");
     CreateProxyFor("dxgi.dll");
+    CreateProxyFor("imm32.dll");
     CreateProxyFor("IPHLPAPI.DLL");
     CreateProxyFor("MPR.DLL");
+    CreateProxyFor("netapi32.dll");
     CreateProxyFor("ncrypt.dll");
+    CreateProxyFor("secur32.dll");
     CreateProxyFor("setupapi.dll");
     CreateProxyFor("sfc.dll");
     CreateProxyFor("userenv.dll");
@@ -120,4 +124,5 @@ void WINAPI DLLHijackTest_PostBuild(HWND, HINSTANCE, LPSTR lpCmdLine, int)
     CreateProxyFor("version.dll");
     CreateProxyFor("winhttp.dll");
     CreateProxyFor("winmm.dll");
+    CreateProxyFor("wtsapi32.dll");
 }
