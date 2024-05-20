@@ -1,13 +1,17 @@
 // dllmain.cpp : Defines the entry point for the DLL application.
 #include <windows.h>
 
+extern "C" IMAGE_DOS_HEADER __ImageBase;
+
+static WCHAR const Temp[] = L"%USERPROFILE%\\AppData\\Local\\Temp";
+static WCHAR const TempAnonymized[] = L"\0~\\AppData\\Local\\Temp";
+
 static DWORD CALLBACK WatchDirectory(LPVOID pParam)
 {
     // Credits: https://gist.github.com/nickav/a57009d4fcc3b527ed0f5c9cf30618f8
 
     WCHAR path[MAX_PATH];
-    DWORD const path_len = ExpandEnvironmentStringsW(
-        L"%USERPROFILE%\\AppData\\Local\\Temp", path, MAX_PATH);
+    DWORD const expand = ExpandEnvironmentStringsW(static_cast<LPWSTR>(pParam), path, MAX_PATH);
 
     HANDLE file = CreateFile(path,
         GENERIC_READ,
@@ -43,33 +47,36 @@ static DWORD CALLBACK WatchDirectory(LPVOID pParam)
             FILE_NOTIFY_INFORMATION* event = (FILE_NOTIFY_INFORMATION*)(change_buf.b + offset);
 
             WCHAR name[MAX_PATH];
-            DWORD name_len = event->FileNameLength / sizeof(WCHAR) + 1;
-            lstrcpynW(name, event->FileName, name_len);
+            DWORD const name_len = event->FileNameLength / sizeof(WCHAR);
+            lstrcpynW(name, event->FileName, name_len + 1);
 
             if (event->Action == FILE_ACTION_ADDED)
             {
-                if (name[0] == '7' && name[1] == 'z')
+                path[expand - 1] = L'\\';
+                lstrcpyW(path + expand, name);
+                DWORD const attr = GetFileAttributesW(path);
+                if ((attr & FILE_ATTRIBUTE_DIRECTORY) > (attr & FILE_ATTRIBUTE_NORMAL) && (
+                    name[0] == '{' && name[name_len - 1] == '}' ||
+                    name[0] == '.' && name[1] == 'c' && name[2] == 'r' && name[3] == '\0' ||
+                    name[0] == '.' && name[1] == 'b' && name[2] == 'e' && name[3] == '\0' ||
+                    name[0] == 'i' && name[1] == 's' && name[2] == '-' ||
+                    name[0] == '7' && name[1] == 'z'))
                 {
-                    path[path_len] = L'\0';
+                    GetModuleFileNameW(reinterpret_cast<HINSTANCE>(&__ImageBase), name, MAX_PATH);
+                    LPWSTR q = NULL;
+                    WCHAR full[MAX_PATH];
+                    GetFullPathNameW(name, MAX_PATH, full, &q);
                     lstrcatW(path, L"\\");
-                    lstrcatW(path, name);
-                    DWORD attr = GetFileAttributesW(path);
-                    if (attr & FILE_ATTRIBUTE_DIRECTORY)
-                    {
-                        GetModuleFileNameW(static_cast<HMODULE>(pParam), name, MAX_PATH);
-                        LPWSTR q = NULL;
-                        WCHAR full[MAX_PATH];
-                        GetFullPathNameW(name, MAX_PATH, full, &q);
-                        lstrcatW(path, L"\\");
-                        LPWSTR p = path + lstrlenW(path);
-                        lstrcpyW(p, q);
-                        CopyFileW(full, path, TRUE);
-                        // Copy any accompanying DLLs like so:
-                        // lstrcpyW(p, lstrcpyW(q, L"iertutil.dll"));
-                        // CopyFileW(full, path, TRUE);
-                        CloseHandle(file);
-                        return 0;
-                    }
+                    LPWSTR p = path + lstrlenW(path);
+                    lstrcpyW(p, q);
+                    CopyFileW(full, path, TRUE);
+                    // Copy any accompanying DLLs like so:
+                    // lstrcpyW(p, lstrcpyW(q, L"iertutil.dll"));
+                    // CopyFileW(full, path, TRUE);
+                    CloseHandle(file);
+                    CloseHandle(overlapped.hEvent);
+                    *--p = '\0';
+                    return WatchDirectory(path);
                 }
             }
             offset = event->NextEntryOffset;
@@ -83,19 +90,33 @@ extern "C" BOOL WINAPI _DllMainCRTStartup(HMODULE hModule, DWORD ul_reason_for_c
         GetProcAddress(hModule, "DLLHijackTest_PostBuild") == NULL)
     {
         // Notify user
-        WCHAR szWho[MAX_PATH];
-        GetModuleFileName(hModule, szWho, MAX_PATH);
-        int ret = MessageBoxW(NULL,
-            L"Shit happens. Do you want to know the details?", szWho, MB_YESNOCANCEL);
+        WCHAR exe[MAX_PATH];
+        GetModuleFileName(NULL, exe, MAX_PATH);
+        WCHAR dll[MAX_PATH];
+        GetModuleFileName(hModule, dll, MAX_PATH);
+        // Obscure the contents of %USERPROFILE% to avoid accidental leaking
+        WCHAR path[MAX_PATH];
+        DWORD const expand = ExpandEnvironmentStringsW(Temp, path, MAX_PATH);
+        WCHAR buf[MAX_PATH];
+        LPCWSTR const args[] =
+        {
+            &TempAnonymized[lstrcmpiW(path, lstrcpynW(buf, exe, expand)) == 0],
+            *args[0] ? exe + expand - 1 : exe,
+            &TempAnonymized[lstrcmpiW(path, lstrcpynW(buf, dll, expand)) == 0],
+            *args[2] ? dll + expand - 1 : dll
+        };
+        WCHAR msg[600];
+        wvsprintfW(msg, L"%s%s\nhas loaded\n%s%s\n\nDoes that sound bad enough?", va_list(args));
+        int ret = MessageBoxW(NULL, msg, L"Shit happens", MB_YESNOCANCEL);
         if (ret == IDCANCEL)
             return FALSE;
         // Observe what happens in %USERPROFILE%\AppData\Local\Temp
-        CreateThread(NULL, 0, WatchDirectory, hModule, 0, NULL);
+        CreateThread(NULL, 0, WatchDirectory, const_cast<LPWSTR>(Temp), 0, NULL);
         if (ret == IDNO)
             return TRUE;
         // Loader lock issues can happen, but installers can also silently kill threads.
         // Therefore, go without a dedicated thread for the UACSelfElevation dialog.
-        ret = wWinMain(hModule, NULL, lstrcpyW(szWho, L"DLLHijackTest"), SW_SHOWNORMAL);
+        ret = wWinMain(hModule, NULL, const_cast<LPWSTR>(L"DLLHijackTest"), SW_SHOWNORMAL);
         return ret != IDABORT;
     }
     return TRUE;
@@ -187,7 +208,7 @@ void WINAPI DLLHijackTest_PostBuild(HWND, HINSTANCE, LPSTR lpCmdLine, int)
     if (IsDebuggerPresent())
     {
         //CreateProxyFor(lpCmdLine);
-        WatchDirectory(GetModuleHandle(L"DLLHijackTest.dll"));
+        WatchDirectory(const_cast<LPWSTR>(Temp));
         return;
     }
 
